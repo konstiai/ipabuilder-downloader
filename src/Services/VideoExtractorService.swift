@@ -18,19 +18,19 @@ public final class VideoExtractorService {
         let urlString = url.absoluteString.lowercased()
         let title = pageTitle?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false ? pageTitle! : "Video \(Int(Date().timeIntervalSince1970))"
         
-        // 1. Ist es eine HLS m3u8 Playlist? (Hier stecken alle Auflösungen bis 4K drin!)
-        if urlString.contains(".m3u8") {
-            let hlsStreams = await parseHLSPlaylist(masterURL: url, title: title)
-            if !hlsStreams.isEmpty {
-                return hlsStreams
-            }
-        }
-        
-        // 2. Handelt es sich um eine YouTube- oder Social-Media-URL?
+        // 1. Handelt es sich um eine YouTube- oder Social-Media-URL?
         if url.host?.contains("youtube.com") == true || url.host?.contains("youtu.be") == true {
             let ytStreams = await extractYouTubeStreams(from: url, title: title)
             if !ytStreams.isEmpty {
                 return ytStreams
+            }
+        }
+        
+        // 2. Ist es eine HLS m3u8 Playlist? (Hier stecken alle Auflösungen bis 4K drin!)
+        if urlString.contains(".m3u8") {
+            let hlsStreams = await parseHLSPlaylist(masterURL: url, title: title)
+            if !hlsStreams.isEmpty {
+                return hlsStreams
             }
         }
         
@@ -41,13 +41,10 @@ public final class VideoExtractorService {
         
         // 4. Fallback: Erzeuge Standard-Qualitätsoptionen für direkte URL
         return [
-            DetectedStreamOption(
-                title: title,
-                quality: .fullHD,
-                downloadURL: url,
-                mimeType: "video/mp4",
-                formatLabel: "Original MP4"
-            )
+            DetectedStreamOption(title: title, quality: .ultraHD4K, downloadURL: url, formatLabel: "4K UHD"),
+            DetectedStreamOption(title: title, quality: .fullHD, downloadURL: url, formatLabel: "1080p Full HD"),
+            DetectedStreamOption(title: title, quality: .hd720, downloadURL: url, formatLabel: "720p HD"),
+            DetectedStreamOption(title: title, quality: .audioHigh, downloadURL: url, formatLabel: "M4A Audio")
         ]
     }
     
@@ -118,7 +115,7 @@ public final class VideoExtractorService {
                         quality: quality,
                         downloadURL: targetURL,
                         mimeType: "application/x-mpegURL",
-                        estimatedBytes: currentBandwidth.map { ($0 * 120) / 8 }, // ca. Schätzung
+                        estimatedBytes: currentBandwidth.map { ($0 * 120) / 8 },
                         formatLabel: "\(quality.shortLabel) HLS"
                     )
                     options.append(opt)
@@ -129,10 +126,8 @@ public final class VideoExtractorService {
             }
         }
         
-        // Nach Auflösung absteigend sortieren (4K zuerst)
         options.sort { $0.quality.resolutionHeight > $1.quality.resolutionHeight }
         
-        // Dubletten pro Auflösung entfernen
         var uniqueOptions: [DetectedStreamOption] = []
         var seenResolutions = Set<Int>()
         for opt in options {
@@ -142,7 +137,6 @@ public final class VideoExtractorService {
             }
         }
         
-        // Füge auch eine Option "Nur Audio" hinzu
         if !uniqueOptions.isEmpty {
             uniqueOptions.append(
                 DetectedStreamOption(
@@ -160,11 +154,9 @@ public final class VideoExtractorService {
     
     // MARK: - YouTube & Multi-Resolution Resolver
     
-    /// Holt alle Qualitäten (inklusive 1080p, 1440p, 4K) für YouTube / Web-Videos
     public func extractYouTubeStreams(from videoURL: URL, title: String) async -> [DetectedStreamOption] {
         var options: [DetectedStreamOption] = []
         
-        // Ermittle Video-ID
         var videoId: String?
         if let host = videoURL.host, host.contains("youtu.be") {
             videoId = videoURL.lastPathComponent
@@ -177,8 +169,6 @@ public final class VideoExtractorService {
             return []
         }
         
-        // Wir bieten dem Nutzer die volle Auswahl aller Auflösungen,
-        // die über moderne Backend-Proxies & Stream-Resolver gerendert werden
         let allQualities: [(VideoQualityOption, String)] = [
             (.ultraHD4K, "2160"),
             (.quadHD2K, "1440"),
@@ -190,7 +180,6 @@ public final class VideoExtractorService {
         ]
         
         for (q, label) in allQualities {
-            // Resolver-URL für diesen Stream
             let resolverURLString = "https://stream.ytdl-bridge.org/download?v=\(vId)&quality=\(label)"
             if let downloadURL = URL(string: resolverURLString) {
                 options.append(
@@ -222,7 +211,6 @@ public final class VideoExtractorService {
             ]
         }
         
-        // Standardmäßig alle Qualitäten anbieten
         return [
             DetectedStreamOption(title: title, quality: .ultraHD4K, downloadURL: url, formatLabel: "4K UHD"),
             DetectedStreamOption(title: title, quality: .fullHD, downloadURL: url, formatLabel: "1080p Full HD"),
@@ -232,9 +220,11 @@ public final class VideoExtractorService {
         ]
     }
     
-    // MARK: - JavaScript Sniffer Code für den WebBrowser
+    // MARK: - JavaScript Sniffer Code & In-Page Download Button Injection
     
-    /// JavaScript-Code, der in jede Webseite injiziert wird, um alle geladenen Video-Streams sofort abzufangen
+    /// JavaScript-Code, der in jede Webseite injiziert wird:
+    /// 1. Überwacht alle Videos und HLS-Streams
+    /// 2. Fügt einen eleganten "Download"-Button direkt UNTER dem Video auf der Webseite ein (wie bei Stephen Lite)!
     public static var snifferJavaScript: String {
         return """
         (function() {
@@ -245,10 +235,81 @@ public final class VideoExtractorService {
                 if (!videoSrc || videoSrc.startsWith('blob:') || videoSrc.startsWith('data:')) return;
                 try {
                     window.webkit.messageHandlers.videoSniffer.postMessage({
+                        action: 'videoDetected',
                         url: videoSrc,
+                        pageUrl: window.location.href,
                         title: title || document.title || 'Web Video'
                     });
                 } catch(e) {}
+            }
+            
+            function onDownloadButtonClicked(e) {
+                if (e) {
+                    e.preventDefault();
+                    e.stopPropagation();
+                }
+                var v = document.querySelector('video');
+                var src = (v && (v.currentSrc || v.src)) ? (v.currentSrc || v.src) : window.location.href;
+                try {
+                    window.webkit.messageHandlers.videoSniffer.postMessage({
+                        action: 'directDownloadClick',
+                        url: src,
+                        pageUrl: window.location.href,
+                        title: document.title || 'Video'
+                    });
+                } catch(err) {}
+            }
+            
+            // Fügt den "Download"-Button direkt unter dem Videoplayer auf der Seite ein
+            function injectUnderVideoDownloadButton() {
+                if (document.getElementById('videosaver-inpage-download-container')) return;
+                
+                var video = document.querySelector('video');
+                if (!video) return;
+                
+                var targetParent = null;
+                var insertBeforeElem = null;
+                
+                // YouTube Mobile Unterstützung
+                if (window.location.hostname.includes('youtube.com')) {
+                    var ytmActions = document.querySelector('ytm-slim-video-action-bar-renderer .slim-video-action-bar-actions');
+                    var ytmPlayer = document.querySelector('#player-control-container') || document.querySelector('#player-container-id');
+                    var ytmHeader = document.querySelector('.slim-video-information-holder');
+                    
+                    if (ytmActions) {
+                        targetParent = ytmActions;
+                    } else if (ytmHeader) {
+                        targetParent = ytmHeader.parentElement;
+                        insertBeforeElem = ytmHeader;
+                    } else if (ytmPlayer && ytmPlayer.parentElement) {
+                        targetParent = ytmPlayer.parentElement;
+                    }
+                }
+                
+                if (!targetParent) {
+                    targetParent = video.parentElement;
+                }
+                if (!targetParent) return;
+                
+                var wrapper = document.createElement('div');
+                wrapper.id = 'videosaver-inpage-download-container';
+                wrapper.style.cssText = 'display:flex; justify-content:center; align-items:center; width:100%; padding:8px 0; margin:6px 0; z-index:99999; clear:both;';
+                
+                var btn = document.createElement('button');
+                btn.type = 'button';
+                btn.id = 'videosaver-under-video-btn';
+                btn.style.cssText = 'display:inline-flex; align-items:center; justify-content:center; gap:8px; background:linear-gradient(135deg, #0A84FF 0%, #5E5CE6 100%); color:#ffffff; font-family:-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; font-size:14px; font-weight:700; padding:10px 20px; border-radius:24px; border:none; cursor:pointer; box-shadow:0 4px 14px rgba(10,132,255,0.4); user-select:none; -webkit-tap-highlight-color:transparent;';
+                btn.innerHTML = '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path><polyline points="7 10 12 15 17 10"></polyline><line x1="12" y1="15" x2="12" y2="3"></line></svg><span>Download (Alle Qualitäten)</span>';
+                
+                btn.addEventListener('click', onDownloadButtonClicked);
+                btn.addEventListener('touchend', onDownloadButtonClicked);
+                wrapper.appendChild(btn);
+                
+                if (insertBeforeElem && targetParent) {
+                    targetParent.insertBefore(wrapper, insertBeforeElem);
+                } else {
+                    targetParent.appendChild(wrapper);
+                }
             }
             
             // 1. Vorhandene und neu eingefügte <video> Elemente überwachen
@@ -265,8 +326,11 @@ public final class VideoExtractorService {
                     
                     v.addEventListener('play', function() {
                         if (v.currentSrc) notifyApp(v.currentSrc, document.title);
+                        injectUnderVideoDownloadButton();
                     });
                 });
+                
+                injectUnderVideoDownloadButton();
             }
             
             setInterval(scanVideos, 1500);
@@ -280,6 +344,7 @@ public final class VideoExtractorService {
                 if (typeof url === 'string') {
                     if (url.includes('.m3u8') || url.includes('.mp4') || url.includes('videoplayback') || url.includes('.webm')) {
                         notifyApp(url, document.title);
+                        setTimeout(injectUnderVideoDownloadButton, 500);
                     }
                 }
                 return originalFetch.apply(this, args);
@@ -290,6 +355,7 @@ public final class VideoExtractorService {
                 if (typeof url === 'string') {
                     if (url.includes('.m3u8') || url.includes('.mp4') || url.includes('videoplayback') || url.includes('.webm')) {
                         notifyApp(url, document.title);
+                        setTimeout(injectUnderVideoDownloadButton, 500);
                     }
                 }
                 return originalOpen.apply(this, arguments);

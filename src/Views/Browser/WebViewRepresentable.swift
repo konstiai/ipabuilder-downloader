@@ -10,8 +10,9 @@ public struct WebViewRepresentable: UIViewRepresentable {
     @Binding public var estimatedProgress: Double
     
     public var isDesktopMode: Bool
-    public var onVideoDetected: (URL, String) -> Void
     public var webViewAction: Binding<WebViewAction>
+    public var onVideoDetected: (URL, String) -> Void
+    public var onDirectDownloadRequested: (URL, String) -> Void
     
     public enum WebViewAction {
         case idle
@@ -30,7 +31,8 @@ public struct WebViewRepresentable: UIViewRepresentable {
         estimatedProgress: Binding<Double>,
         isDesktopMode: Bool = false,
         webViewAction: Binding<WebViewAction>,
-        onVideoDetected: @escaping (URL, String) -> Void
+        onVideoDetected: @escaping (URL, String) -> Void,
+        onDirectDownloadRequested: @escaping (URL, String) -> Void
     ) {
         self._currentURLString = currentURLString
         self._canGoBack = canGoBack
@@ -41,6 +43,7 @@ public struct WebViewRepresentable: UIViewRepresentable {
         self.isDesktopMode = isDesktopMode
         self.webViewAction = webViewAction
         self.onVideoDetected = onVideoDetected
+        self.onDirectDownloadRequested = onDirectDownloadRequested
     }
     
     public func makeCoordinator() -> Coordinator {
@@ -79,11 +82,9 @@ public struct WebViewRepresentable: UIViewRepresentable {
     }
     
     public func updateUIView(_ webView: WKWebView, context: Context) {
-        // Desktop User Agent Toggle
         let desktopUA = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Safari/605.1.15"
         webView.customUserAgent = isDesktopMode ? desktopUA : nil
         
-        // Aktionen ausführen (Back, Forward, Reload, URL laden)
         switch webViewAction.wrappedValue {
         case .goBack:
             if webView.canGoBack { webView.goBack() }
@@ -125,16 +126,37 @@ public struct WebViewRepresentable: UIViewRepresentable {
             }
         }
         
-        // MARK: - Script Message Handler (Video Sniffer)
+        // MARK: - Script Message Handler (Video Sniffer & In-Page Download Button)
         
         public func userContentController(_ userContentController: WKUserContentController, didReceive message: WKScriptMessage) {
             if message.name == "videoSniffer",
-               let body = message.body as? [String: Any],
-               let urlString = body["url"] as? String,
-               let url = URL(string: urlString) {
+               let body = message.body as? [String: Any] {
+                
+                let action = body["action"] as? String ?? "videoDetected"
+                let urlString = body["url"] as? String ?? ""
+                let pageUrlString = body["pageUrl"] as? String ?? ""
                 let title = body["title"] as? String ?? ""
+                
+                // Bevorzuge YouTube/Webseiten-PageURL falls vorhanden
+                let targetURL: URL?
+                if pageUrlString.contains("youtube.com") || pageUrlString.contains("youtu.be") {
+                    targetURL = URL(string: pageUrlString)
+                } else if !urlString.isEmpty {
+                    targetURL = URL(string: urlString)
+                } else {
+                    targetURL = URL(string: pageUrlString)
+                }
+                
+                guard let finalURL = targetURL else { return }
+                
                 DispatchQueue.main.async {
-                    self.parent.onVideoDetected(url, title)
+                    if action == "directDownloadClick" {
+                        // Der Nutzer hat direkt auf den Download-Button unter dem Video geklickt!
+                        self.parent.onDirectDownloadRequested(finalURL, title)
+                    } else {
+                        // Normaler Hintergrund-Sniffer
+                        self.parent.onVideoDetected(finalURL, title)
+                    }
                 }
             }
         }

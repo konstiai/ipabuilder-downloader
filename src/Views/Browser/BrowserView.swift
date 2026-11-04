@@ -10,7 +10,7 @@ public struct BrowserView: View {
     @State private var isDesktopMode: Bool = false
     @State private var estimatedProgress: Double = 0.0
     
-    // Sniffer State
+    // Sniffer & Video State
     @State private var detectedStreams: [(url: URL, title: String)] = []
     @State private var showingDetectedSheet = false
     @State private var activeDetectedURL: URL?
@@ -96,6 +96,13 @@ public struct BrowserView: View {
                             webViewAction: $webViewAction,
                             onVideoDetected: { url, title in
                                 handleVideoDetected(url: url, title: title)
+                            },
+                            onDirectDownloadRequested: { url, title in
+                                // Sofortiger Download-Aufruf bei Klick auf den Button direkt unter dem Video
+                                self.activeDetectedURL = url
+                                self.activeDetectedTitle = title.isEmpty ? currentTab.title : title
+                                self.showingDetectedSheet = true
+                                AppTheme.triggerHaptic(style: .medium)
                             }
                         )
                         .onChange(of: tabs[currentTabIndex].urlString) { newURL in
@@ -103,7 +110,7 @@ public struct BrowserView: View {
                         }
                     }
                     
-                    // Floating Video Download Button (erscheint sobald Video auf Seite erkannt wurde)
+                    // Schwebender Video Download Button
                     if !detectedStreams.isEmpty {
                         Button {
                             if let last = detectedStreams.last {
@@ -129,9 +136,53 @@ public struct BrowserView: View {
                             .shadow(color: .blue.opacity(0.4), radius: 8, x: 0, y: 4)
                         }
                         .padding(.trailing, 16)
-                        .padding(.bottom, 20)
+                        .padding(.bottom, 16)
                         .transition(.scale.combined(with: .opacity))
                     }
+                }
+                
+                // Schnelle Video-Aktionsleiste unter dem Web-Content (wenn ein Video erkannt wurde)
+                if let activeVideo = detectedStreams.last {
+                    HStack(spacing: 12) {
+                        Image(systemName: "play.circle.fill")
+                            .font(.title2)
+                            .foregroundStyle(.blue)
+                        
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text("Video erkannt (Alle Qualitäten)")
+                                .font(.system(size: 10, weight: .bold))
+                                .foregroundStyle(.blue)
+                                .textCase(.uppercase)
+                            
+                            Text(activeVideo.title.isEmpty ? currentTab.title : activeVideo.title)
+                                .font(.caption.bold())
+                                .lineLimit(1)
+                        }
+                        
+                        Spacer()
+                        
+                        Button {
+                            activeDetectedURL = activeVideo.url
+                            activeDetectedTitle = activeVideo.title.isEmpty ? currentTab.title : activeVideo.title
+                            showingDetectedSheet = true
+                            AppTheme.triggerHaptic(style: .medium)
+                        } label: {
+                            HStack(spacing: 6) {
+                                Image(systemName: "arrow.down.circle.fill")
+                                Text("Download")
+                            }
+                            .font(.subheadline.bold())
+                            .padding(.horizontal, 14)
+                            .padding(.vertical, 8)
+                            .background(AppTheme.primaryGradient)
+                            .foregroundStyle(.white)
+                            .clipShape(Capsule())
+                        }
+                    }
+                    .padding(.horizontal, 16)
+                    .padding(.vertical, 8)
+                    .background(Color(uiColor: .secondarySystemBackground))
+                    .transition(.move(edge: .bottom).combined(with: .opacity))
                 }
                 
                 // Untere Navigationsleiste
@@ -242,7 +293,6 @@ public struct BrowserView: View {
             urlToLoad = "https://www.google.com/search?q=\(encoded)"
         }
         
-        // Tab URL aktualisieren
         if tabs.indices.contains(currentTabIndex) {
             tabs[currentTabIndex].urlString = urlToLoad
             detectedStreams.removeAll()
