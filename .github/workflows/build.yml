@@ -12,9 +12,9 @@ jobs:
           APPDIR="build/Downloader.app"
           mkdir -p "$APPDIR"
           if [ -n "$(find src -name '*.swift' | head -1)" ]; then
-            find src -name '*.swift' -print0 | xargs -0 xcrun swiftc -sdk "$SDK" -target arm64-apple-ios15.0 -parse-as-library -O -module-name Downloader -o "$APPDIR/Downloader"
+            find src -name '*.swift' -print0 | xargs -0 xcrun swiftc -sdk "$SDK" -target arm64-apple-ios16.0 -parse-as-library -O -module-name Downloader -o "$APPDIR/Downloader"
           else
-            find src \( -name '*.m' -o -name '*.mm' -o -name '*.c' -o -name '*.cpp' \) -print0 | xargs -0 xcrun clang -isysroot "$SDK" -arch arm64 -miphoneos-version-min=15.0 -fobjc-arc -framework UIKit -framework Foundation -lc++ -o "$APPDIR/Downloader"
+            find src \( -name '*.m' -o -name '*.mm' -o -name '*.c' -o -name '*.cpp' \) -print0 | xargs -0 xcrun clang -isysroot "$SDK" -arch arm64 -miphoneos-version-min=16.0 -fobjc-arc -framework UIKit -framework Foundation -lc++ -o "$APPDIR/Downloader"
           fi
       - name: Sign (ldid)
         run: |

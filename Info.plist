@@ -47,7 +47,7 @@
 	<key>CFBundleVersion</key>
 	<string>1</string>
 	<key>MinimumOSVersion</key>
-	<string>15.0</string>
+	<string>16.0</string>
 	<key>NSFaceIDUsageDescription</key>
 	<string>This app uses Face ID.</string>
 	<key>NSMicrophoneUsageDescription</key>
