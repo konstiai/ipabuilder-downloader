@@ -16,67 +16,87 @@ public struct DownloadsView: View {
     
     public var body: some View {
         NavigationStack {
-            Group {
-                if downloadManager.tasks.isEmpty {
-                    VStack(spacing: 20) {
-                        Image(systemName: "arrow.down.circle")
-                            .font(.system(size: 64))
-                            .foregroundStyle(.secondary)
+            VStack(spacing: 0) {
+                // Prominenter Download-Button immer ganz oben sichtbar
+                Button {
+                    showingDirectDownload = true
+                } label: {
+                    HStack(spacing: 12) {
+                        Image(systemName: "plus.circle.fill")
+                            .font(.title2)
                         
-                        Text("Keine aktiven Downloads")
-                            .font(.title2.bold())
-                        
-                        Text("Nutze den integrierten Browser oder füge direkt einen Videolink ein, um Downloads in beliebiger Qualität (bis 4K) zu starten.")
-                            .font(.subheadline)
-                            .foregroundStyle(.secondary)
-                            .multilineTextAlignment(.center)
-                            .padding(.horizontal, 32)
-                        
-                        Button {
-                            showingDirectDownload = true
-                        } label: {
-                            HStack {
-                                Image(systemName: "link.badge.plus")
-                                Text("Link einfügen")
-                            }
-                            .font(.headline)
-                            .padding(.horizontal, 24)
-                            .padding(.vertical, 12)
-                            .background(Color.blue)
-                            .foregroundStyle(.white)
-                            .clipShape(Capsule())
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text("Neues Video herunterladen")
+                                .font(.headline)
+                            Text("Link einfügen • Alle echten Auflösungen (HD/4K)")
+                                .font(.caption2)
+                                .opacity(0.85)
                         }
+                        
+                        Spacer()
+                        
+                        Image(systemName: "arrow.right.circle")
+                            .font(.title3)
                     }
-                    .frame(maxWidth: .infinity, maxHeight: .infinity)
-                } else {
-                    List {
-                        if !activeTasks.isEmpty {
-                            Section(header: Text("Warteschlange & Aktiv (\(activeTasks.count))")) {
-                                ForEach(activeTasks) { task in
-                                    DownloadRowView(item: task)
-                                }
-                            }
+                    .padding()
+                    .background(
+                        LinearGradient(colors: [.blue, .purple], startPoint: .leading, endPoint: .trailing)
+                    )
+                    .foregroundStyle(.white)
+                    .clipShape(RoundedRectangle(cornerRadius: 14))
+                    .shadow(color: .blue.opacity(0.3), radius: 6, x: 0, y: 3)
+                }
+                .padding(.horizontal)
+                .padding(.top, 10)
+                .padding(.bottom, 6)
+                
+                Group {
+                    if downloadManager.tasks.isEmpty {
+                        VStack(spacing: 16) {
+                            Image(systemName: "arrow.down.circle")
+                                .font(.system(size: 60))
+                                .foregroundStyle(.secondary)
+                            
+                            Text("Keine Downloads vorhanden")
+                                .font(.title3.bold())
+                            
+                            Text("Tippe oben auf 'Neues Video herunterladen' oder nutze den internen Browser, um Videos in allen verfügbaren Qualitäten herunterzuladen.")
+                                .font(.subheadline)
+                                .foregroundStyle(.secondary)
+                                .multilineTextAlignment(.center)
+                                .padding(.horizontal, 32)
                         }
-                        
-                        if !completedTasks.isEmpty {
-                            Section {
-                                ForEach(completedTasks) { task in
-                                    DownloadRowView(item: task)
-                                }
-                            } header: {
-                                HStack {
-                                    Text("Kürzlich fertiggestellt (\(completedTasks.count))")
-                                    Spacer()
-                                    Button("Bereinigen") {
-                                        downloadManager.clearCompleted()
+                        .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    } else {
+                        List {
+                            if !activeTasks.isEmpty {
+                                Section(header: Text("Warteschlange & Aktiv (\(activeTasks.count))")) {
+                                    ForEach(activeTasks) { task in
+                                        DownloadRowView(item: task)
                                     }
-                                    .font(.caption)
-                                    .textCase(.none)
+                                }
+                            }
+                            
+                            if !completedTasks.isEmpty {
+                                Section {
+                                    ForEach(completedTasks) { task in
+                                        DownloadRowView(item: task)
+                                    }
+                                } header: {
+                                    HStack {
+                                        Text("Abgeschlossen (\(completedTasks.count))")
+                                        Spacer()
+                                        Button("Bereinigen") {
+                                            downloadManager.clearCompleted()
+                                        }
+                                        .font(.caption)
+                                        .textCase(.none)
+                                    }
                                 }
                             }
                         }
+                        .listStyle(.insetGrouped)
                     }
-                    .listStyle(.insetGrouped)
                 }
             }
             .navigationTitle("Downloads")

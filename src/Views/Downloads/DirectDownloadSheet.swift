@@ -39,7 +39,7 @@ public struct DirectDownloadSheet: View {
                                 ProgressView()
                                     .padding(.trailing, 6)
                             }
-                            Text(isAnalyzing ? "Analysiere alle Qualitäten..." : "Qualitäten laden")
+                            Text(isAnalyzing ? "Analysiere verfügbare Qualitäten..." : "Qualitäten prüfen & anzeigen")
                                 .bold()
                             Spacer()
                         }
@@ -48,41 +48,55 @@ public struct DirectDownloadSheet: View {
                 } header: {
                     Text("Direkt-Download per Link")
                 } footer: {
-                    Text("Füge einen beliebigen Link ein. Unser Video-Analyzer erkennt automatisch alle Auflösungen von 360p bis 4K Ultra HD.")
+                    Text("Es werden nur die Qualitäten angezeigt, in denen das Video tatsächlich vorliegt (z.B. 1080p, 720p, 480p). Gibt es das Video nicht in 4K, wird 4K nicht angezeigt.")
                 }
                 
                 if let error = errorMessage {
                     Section {
-                        Text(error)
-                            .font(.caption)
-                            .foregroundStyle(.red)
+                        HStack(spacing: 10) {
+                            Image(systemName: "exclamationmark.circle.fill")
+                                .foregroundStyle(.red)
+                            Text(error)
+                                .font(.caption)
+                                .foregroundStyle(.red)
+                        }
                     }
                 }
                 
                 if !streamOptions.isEmpty {
-                    Section(header: Text("Verfügbare Auflösungen")) {
+                    Section(header: Text("Tatsächlich verfügbare Qualitäten (\(streamOptions.count))")) {
                         ForEach(streamOptions) { option in
                             Button {
                                 startDownload(option: option)
                             } label: {
                                 HStack(spacing: 12) {
                                     Image(systemName: option.quality.iconName)
+                                        .font(.title3)
                                         .foregroundStyle(option.quality.badgeColor)
                                         .frame(width: 28)
                                     
-                                    VStack(alignment: .leading, spacing: 2) {
+                                    VStack(alignment: .leading, spacing: 3) {
                                         Text(option.quality.rawValue)
                                             .font(.headline)
                                             .foregroundStyle(.primary)
-                                        Text(option.formatLabel)
-                                            .font(.caption)
-                                            .foregroundStyle(.secondary)
+                                        
+                                        HStack(spacing: 6) {
+                                            Text(option.formatLabel)
+                                                .font(.caption2)
+                                                .foregroundStyle(.secondary)
+                                            
+                                            if let size = option.estimatedBytes, size > 0 {
+                                                Text("• \(Formatters.formatBytes(size))")
+                                                    .font(.caption2)
+                                                    .foregroundStyle(.secondary)
+                                            }
+                                        }
                                     }
                                     
                                     Spacer()
                                     
                                     Image(systemName: "arrow.down.circle.fill")
-                                        .font(.title3)
+                                        .font(.title2)
                                         .foregroundStyle(.blue)
                                 }
                                 .padding(.vertical, 4)
@@ -100,6 +114,17 @@ public struct DirectDownloadSheet: View {
                     }
                 }
             }
+            .onAppear {
+                checkClipboardForURL()
+            }
+        }
+    }
+    
+    private func checkClipboardForURL() {
+        if let clip = UIPasteboard.general.string?.trimmingCharacters(in: .whitespacesAndNewlines),
+           !clip.isEmpty, (clip.hasPrefix("http://") || clip.hasPrefix("https://") || clip.contains("youtu")) {
+            self.urlString = clip
+            analyzeURL()
         }
     }
     
@@ -132,7 +157,7 @@ public struct DirectDownloadSheet: View {
                     self.streamOptions = options
                     self.isAnalyzing = false
                     if options.isEmpty {
-                        self.errorMessage = "Keine abspielbaren Streams für diesen Link gefunden."
+                        self.errorMessage = "Keine abspielbaren Streams für diesen Link gefunden. Bitte prüfe die URL."
                     }
                 }
             } catch {

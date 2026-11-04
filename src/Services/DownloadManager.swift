@@ -22,6 +22,9 @@ public final class DownloadManager: NSObject, ObservableObject {
         let config = URLSessionConfiguration.background(withIdentifier: "com.konsti.videosaverpro.backgrounddownloads")
         config.isDiscretionary = false
         config.sessionSendsLaunchEvents = true
+        config.httpAdditionalHeaders = [
+            "User-Agent": "Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Mobile/15E148 Safari/604.1"
+        ]
         self.urlSession = URLSession(configuration: config, delegate: self, delegateQueue: nil)
         
         loadSavedTasks()
@@ -144,7 +147,6 @@ public final class DownloadManager: NSObject, ObservableObject {
         if let data = UserDefaults.standard.data(forKey: tasksStorageKey),
            let decoded = try? JSONDecoder().decode([DownloadTaskItem].self, from: data) {
             self.tasks = decoded
-            // Pausierte Tasks als pausiert belassen, aktive nach App-Neustart auf pausiert setzen
             for i in 0..<self.tasks.count {
                 if self.tasks[i].status == .downloading {
                     self.tasks[i].status = .paused
@@ -174,10 +176,10 @@ extension DownloadManager: URLSessionDownloadDelegate {
                 self.tasks[index].progress = Double(totalBytesWritten) / Double(totalBytesExpectedToWrite)
             } else {
                 // Bei dynamischer Streamlänge
-                self.tasks[index].progress = 0.5
+                self.tasks[index].progress = min(0.95, Double(totalBytesWritten) / 20_000_000.0)
             }
             
-            // Download-Geschwindigkeit ermitteln
+            // Download-Geschwindigkeit berechnen
             let now = Date()
             if let last = self.lastSpeedCheckMap[itemId] {
                 let interval = now.timeIntervalSince(last.time)
@@ -198,9 +200,27 @@ extension DownloadManager: URLSessionDownloadDelegate {
         downloadTask: URLSessionDownloadTask,
         didFinishDownloadingTo location: URL
     ) {
+        // WICHTIG: Die temporäre Datei an `location` MUSS sofort synchron gesichert werden,
+        // da iOS sie nach Beenden dieser Delegate-Methode automatisch löscht!
+        let tempUUID = UUID().uuidString
+        let safeTempURL = FileManager.default.temporaryDirectory.appendingPathComponent("\(tempUUID).tmp")
+        
+        do {
+            if FileManager.default.fileExists(atPath: safeTempURL.path) {
+                try FileManager.default.removeItem(at: safeTempURL)
+            }
+            try FileManager.default.copyItem(at: location, to: safeTempURL)
+        } catch {
+            print("Fehler beim sofortigen Sichern der Download-Datei: \(error)")
+            return
+        }
+        
         Task { @MainActor in
             guard let itemId = self.taskMap[downloadTask.taskIdentifier],
-                  let index = self.tasks.firstIndex(where: { $0.id == itemId }) else { return }
+                  let index = self.tasks.firstIndex(where: { $0.id == itemId }) else {
+                try? FileManager.default.removeItem(at: safeTempURL)
+                return
+            }
             
             let currentTask = self.tasks[index]
             self.tasks[index].status = .completed
@@ -212,10 +232,10 @@ extension DownloadManager: URLSessionDownloadDelegate {
             self.updateActiveCount()
             self.saveTasks()
             
-            // Datei dauerhaft in StorageManager speichern
+            // Datei dauerhaft im StorageManager registrieren
             let ext = currentTask.quality.isAudioOnly ? "m4a" : "mp4"
             _ = await StorageManager.shared.registerDownloadedFile(
-                temporaryURL: location,
+                temporaryURL: safeTempURL,
                 title: currentTask.title,
                 quality: currentTask.quality,
                 fileExtension: ext
@@ -236,10 +256,8 @@ extension DownloadManager: URLSessionDownloadDelegate {
                       let itemId = self.taskMap[downloadTask.taskIdentifier],
                       let index = self.tasks.firstIndex(where: { $0.id == itemId }) else { return }
                 
-                // Prüfen ob es manuell abgebrochen / pausiert wurde
                 let nsError = error as NSError
                 if nsError.domain == NSURLErrorDomain && nsError.code == NSURLErrorCancelled {
-                    // War geplante Pause oder Cancel
                     return
                 }
                 

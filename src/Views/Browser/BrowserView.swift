@@ -2,10 +2,10 @@ import SwiftUI
 
 public struct BrowserView: View {
     @State private var tabs: [BrowserTab] = [
-        BrowserTab(title: "Google", urlString: "https://www.google.com")
+        BrowserTab(title: "YouTube", urlString: "https://m.youtube.com")
     ]
     @State private var currentTabIndex: Int = 0
-    @State private var addressText: String = "https://www.google.com"
+    @State private var addressText: String = "https://m.youtube.com"
     @State private var webViewAction: WebViewRepresentable.WebViewAction = .idle
     @State private var isDesktopMode: Bool = false
     @State private var estimatedProgress: Double = 0.0
@@ -27,6 +27,13 @@ public struct BrowserView: View {
             return tabs[currentTabIndex]
         }
         return BrowserTab()
+    }
+    
+    /// Prüft ob die aktuelle Seite ein Video enthält (z.B. YouTube watch/shorts oder erkannter Stream)
+    private var isCurrentPageVideo: Bool {
+        let urlLower = currentTab.urlString.lowercased()
+        let isYTVideo = urlLower.contains("youtube.com/watch") || urlLower.contains("youtu.be/") || urlLower.contains("/shorts/")
+        return isYTVideo || !detectedStreams.isEmpty
     }
     
     public var body: some View {
@@ -63,12 +70,34 @@ public struct BrowserView: View {
                         .background(Color(uiColor: .tertiarySystemFill))
                         .clipShape(RoundedRectangle(cornerRadius: 10))
                         
-                        Button {
-                            loadAddress()
-                        } label: {
-                            Image(systemName: "arrow.right.circle.fill")
-                                .font(.title3)
-                                .foregroundStyle(.blue)
+                        // Direkter Download-Button in der oberen Leiste, wenn ein Video aktiv ist
+                        if isCurrentPageVideo {
+                            Button {
+                                triggerDownloadForCurrentPage()
+                            } label: {
+                                HStack(spacing: 4) {
+                                    Image(systemName: "arrow.down.circle.fill")
+                                    Text("Download")
+                                        .font(.subheadline.bold())
+                                }
+                                .padding(.horizontal, 12)
+                                .padding(.vertical, 8)
+                                .background(
+                                    LinearGradient(colors: [.blue, .purple], startPoint: .leading, endPoint: .trailing)
+                                )
+                                .foregroundStyle(.white)
+                                .clipShape(Capsule())
+                                .shadow(color: .blue.opacity(0.3), radius: 4, x: 0, y: 2)
+                            }
+                            .transition(.scale.combined(with: .opacity))
+                        } else {
+                            Button {
+                                loadAddress()
+                            } label: {
+                                Image(systemName: "arrow.right.circle.fill")
+                                    .font(.title3)
+                                    .foregroundStyle(.blue)
+                            }
                         }
                     }
                     .padding(.horizontal, 12)
@@ -81,6 +110,46 @@ public struct BrowserView: View {
                     }
                 }
                 .background(AppTheme.cardBackground)
+                
+                // Auffälliger Download-Hinweisbanner direkt unter der Adressleiste
+                if isCurrentPageVideo {
+                    HStack(spacing: 10) {
+                        Image(systemName: "play.rectangle.fill")
+                            .font(.title3)
+                            .foregroundStyle(.blue)
+                        
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text("Video erkannt!")
+                                .font(.caption2.bold())
+                                .foregroundStyle(.blue)
+                                .textCase(.uppercase)
+                            Text(currentTab.title.isEmpty ? "Aktuelles Video" : currentTab.title)
+                                .font(.caption.bold())
+                                .lineLimit(1)
+                        }
+                        
+                        Spacer()
+                        
+                        Button {
+                            triggerDownloadForCurrentPage()
+                        } label: {
+                            HStack(spacing: 6) {
+                                Image(systemName: "arrow.down.circle.fill")
+                                Text("Herunterladen")
+                            }
+                            .font(.caption.bold())
+                            .padding(.horizontal, 12)
+                            .padding(.vertical, 6)
+                            .background(Color.blue)
+                            .foregroundStyle(.white)
+                            .clipShape(Capsule())
+                        }
+                    }
+                    .padding(.horizontal, 14)
+                    .padding(.vertical, 8)
+                    .background(Color.blue.opacity(0.12))
+                    .transition(.move(edge: .top).combined(with: .opacity))
+                }
                 
                 // Webview Bereich
                 ZStack(alignment: .bottomTrailing) {
@@ -98,7 +167,7 @@ public struct BrowserView: View {
                                 handleVideoDetected(url: url, title: title)
                             },
                             onDirectDownloadRequested: { url, title in
-                                // Sofortiger Download-Aufruf bei Klick auf den Button direkt unter dem Video
+                                // Nutzer hat direkt auf den Button unter dem Video geklickt
                                 self.activeDetectedURL = url
                                 self.activeDetectedTitle = title.isEmpty ? currentTab.title : title
                                 self.showingDetectedSheet = true
@@ -107,82 +176,35 @@ public struct BrowserView: View {
                         )
                         .onChange(of: tabs[currentTabIndex].urlString) { newURL in
                             self.addressText = newURL
+                            // Automatisch prüfen ob neue URL ein Video ist
+                            checkPageForVideo(urlString: newURL)
                         }
                     }
                     
-                    // Schwebender Video Download Button
-                    if !detectedStreams.isEmpty {
+                    // Großer schwebender Video-Download-Button
+                    if isCurrentPageVideo {
                         Button {
-                            if let last = detectedStreams.last {
-                                activeDetectedURL = last.url
-                                activeDetectedTitle = last.title
-                                showingDetectedSheet = true
-                                AppTheme.triggerHaptic(style: .medium)
-                            }
+                            triggerDownloadForCurrentPage()
                         } label: {
                             HStack(spacing: 8) {
                                 Image(systemName: "arrow.down.to.line.compact")
-                                    .font(.headline)
-                                Text("Download (\(detectedStreams.count))")
-                                    .font(.subheadline.bold())
+                                    .font(.title3)
+                                Text("Download")
+                                    .font(.headline.bold())
                             }
-                            .padding(.horizontal, 16)
-                            .padding(.vertical, 12)
+                            .padding(.horizontal, 20)
+                            .padding(.vertical, 14)
                             .background(
-                                LinearGradient(colors: [.blue, .purple], startPoint: .leading, endPoint: .trailing)
+                                LinearGradient(colors: [.blue, .purple], startPoint: .topLeading, endPoint: .bottomTrailing)
                             )
                             .foregroundStyle(.white)
                             .clipShape(Capsule())
-                            .shadow(color: .blue.opacity(0.4), radius: 8, x: 0, y: 4)
+                            .shadow(color: .blue.opacity(0.45), radius: 10, x: 0, y: 5)
                         }
                         .padding(.trailing, 16)
-                        .padding(.bottom, 16)
+                        .padding(.bottom, 20)
                         .transition(.scale.combined(with: .opacity))
                     }
-                }
-                
-                // Schnelle Video-Aktionsleiste unter dem Web-Content (wenn ein Video erkannt wurde)
-                if let activeVideo = detectedStreams.last {
-                    HStack(spacing: 12) {
-                        Image(systemName: "play.circle.fill")
-                            .font(.title2)
-                            .foregroundStyle(.blue)
-                        
-                        VStack(alignment: .leading, spacing: 2) {
-                            Text("Video erkannt (Alle Qualitäten)")
-                                .font(.system(size: 10, weight: .bold))
-                                .foregroundStyle(.blue)
-                                .textCase(.uppercase)
-                            
-                            Text(activeVideo.title.isEmpty ? currentTab.title : activeVideo.title)
-                                .font(.caption.bold())
-                                .lineLimit(1)
-                        }
-                        
-                        Spacer()
-                        
-                        Button {
-                            activeDetectedURL = activeVideo.url
-                            activeDetectedTitle = activeVideo.title.isEmpty ? currentTab.title : activeVideo.title
-                            showingDetectedSheet = true
-                            AppTheme.triggerHaptic(style: .medium)
-                        } label: {
-                            HStack(spacing: 6) {
-                                Image(systemName: "arrow.down.circle.fill")
-                                Text("Download")
-                            }
-                            .font(.subheadline.bold())
-                            .padding(.horizontal, 14)
-                            .padding(.vertical, 8)
-                            .background(AppTheme.primaryGradient)
-                            .foregroundStyle(.white)
-                            .clipShape(Capsule())
-                        }
-                    }
-                    .padding(.horizontal, 16)
-                    .padding(.vertical, 8)
-                    .background(Color(uiColor: .secondarySystemBackground))
-                    .transition(.move(edge: .bottom).combined(with: .opacity))
                 }
                 
                 // Untere Navigationsleiste
@@ -261,7 +283,7 @@ public struct BrowserView: View {
             }
             .sheet(isPresented: $showingTabsSheet) {
                 TabsManagerView(tabs: $tabs, currentTabIndex: $currentTabIndex) {
-                    let newTab = BrowserTab(title: "Google", urlString: "https://www.google.com")
+                    let newTab = BrowserTab(title: "YouTube", urlString: "https://m.youtube.com")
                     tabs.append(newTab)
                     currentTabIndex = tabs.count - 1
                     addressText = newTab.urlString
@@ -273,6 +295,32 @@ public struct BrowserView: View {
                     addressText = selectedURL
                     loadAddress()
                 }
+            }
+        }
+    }
+    
+    private func triggerDownloadForCurrentPage() {
+        let currentURLStr = currentTab.urlString
+        let targetURL: URL
+        if let last = detectedStreams.last {
+            targetURL = last.url
+        } else if let pageURL = URL(string: currentURLStr) {
+            targetURL = pageURL
+        } else {
+            return
+        }
+        
+        self.activeDetectedURL = targetURL
+        self.activeDetectedTitle = currentTab.title.isEmpty ? "Video" : currentTab.title
+        self.showingDetectedSheet = true
+        AppTheme.triggerHaptic(style: .medium)
+    }
+    
+    private func checkPageForVideo(urlString: String) {
+        let lower = urlString.lowercased()
+        if lower.contains("watch?v=") || lower.contains("/shorts/") || lower.contains("youtu.be/") {
+            if let url = URL(string: urlString) {
+                handleVideoDetected(url: url, title: currentTab.title)
             }
         }
     }

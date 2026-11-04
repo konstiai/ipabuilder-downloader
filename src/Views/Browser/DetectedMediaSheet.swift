@@ -9,7 +9,7 @@ public struct DetectedMediaSheet: View {
     @State private var videoTitle: String
     @State private var availableOptions: [DetectedStreamOption] = []
     @State private var isAnalyzing: Bool = true
-    @State private var selectedQuality: VideoQualityOption = .fullHD
+    @State private var errorMessage: String?
     
     public init(detectedURL: URL, initialTitle: String) {
         self.detectedURL = detectedURL
@@ -31,9 +31,9 @@ public struct DetectedMediaSheet: View {
                             .clipShape(RoundedRectangle(cornerRadius: 12))
                         
                         VStack(alignment: .leading, spacing: 4) {
-                            Text("Video erkannt!")
+                            Text("Video erkannt")
                                 .font(.caption.bold())
-                                .foregroundStyle(.secondary)
+                                .foregroundStyle(.blue)
                                 .textCase(.uppercase)
                             
                             TextField("Videotitel anpassen...", text: $videoTitle)
@@ -53,25 +53,35 @@ public struct DetectedMediaSheet: View {
                     VStack(spacing: 16) {
                         ProgressView()
                             .scaleEffect(1.2)
-                        Text("Analysiere alle verfügbaren Auflösungen...")
-                            .font(.subheadline)
-                            .foregroundStyle(.secondary)
-                        Text("(Einschließlich 1080p, 1440p und 4K Ultra HD)")
-                            .font(.caption2)
-                            .foregroundStyle(.secondary)
-                    }
-                    .frame(maxWidth: .infinity, maxHeight: .infinity)
-                } else if availableOptions.isEmpty {
-                    VStack(spacing: 12) {
-                        Image(systemName: "exclamationmark.triangle")
-                            .font(.largeTitle)
-                            .foregroundStyle(.orange)
-                        Text("Keine Streams gefunden")
-                            .font(.headline)
-                        Text("Für diesen Link konnten keine Stream-Optionen extrahiert werden.")
+                        Text("Ermittle verfügbare Video-Qualitäten...")
+                            .font(.subheadline.bold())
+                        Text("Prüfe, in welchen Auflösungen dieses Video tatsächlich verfügbar ist.")
                             .font(.caption)
                             .foregroundStyle(.secondary)
                             .multilineTextAlignment(.center)
+                            .padding(.horizontal, 32)
+                    }
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                } else if availableOptions.isEmpty {
+                    VStack(spacing: 14) {
+                        Image(systemName: "exclamationmark.triangle.fill")
+                            .font(.system(size: 48))
+                            .foregroundStyle(.orange)
+                        Text("Keine Streams gefunden")
+                            .font(.headline)
+                        Text(errorMessage ?? "Für dieses Video konnten keine direkten Streams geladen werden.")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                            .multilineTextAlignment(.center)
+                            .padding(.horizontal, 32)
+                        
+                        Button {
+                            Task { await loadStreams() }
+                        } label: {
+                            Label("Erneut versuchen", systemImage: "arrow.clockwise")
+                                .font(.subheadline.bold())
+                        }
+                        .padding(.top, 8)
                     }
                     .padding()
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -95,12 +105,12 @@ public struct DetectedMediaSheet: View {
                                                     .foregroundStyle(.primary)
                                                 
                                                 if option.quality == .ultraHD4K || option.quality == .quadHD2K || option.quality == .fullHD {
-                                                    Text("PRO")
+                                                    Text("HD")
                                                         .font(.system(size: 10, weight: .bold))
                                                         .padding(.horizontal, 6)
                                                         .padding(.vertical, 2)
-                                                        .background(Color.purple.opacity(0.2))
-                                                        .foregroundStyle(.purple)
+                                                        .background(Color.blue.opacity(0.15))
+                                                        .foregroundStyle(.blue)
                                                         .clipShape(Capsule())
                                                 }
                                             }
@@ -113,7 +123,7 @@ public struct DetectedMediaSheet: View {
                                                     .background(Color.secondary.opacity(0.15))
                                                     .clipShape(RoundedRectangle(cornerRadius: 4))
                                                 
-                                                if let size = option.estimatedBytes {
+                                                if let size = option.estimatedBytes, size > 0 {
                                                     Text(Formatters.formatBytes(size))
                                                         .font(.caption2)
                                                         .foregroundStyle(.secondary)
@@ -131,9 +141,9 @@ public struct DetectedMediaSheet: View {
                                 }
                             }
                         } header: {
-                            Text("Wähle deine gewünschte Qualität")
+                            Text("Tatsächlich verfügbare Qualitäten (\(availableOptions.count))")
                         } footer: {
-                            Text("Im Gegensatz zu Stephen Lite werden hier alle Auflösungen bis zu 4K Ultra HD & reine Audiospuren ohne Einschränkung unterstützt.")
+                            Text("Es werden nur Qualitäten aufgeführt, in denen das Video vom Ersteller hochgeladen wurde. Auflösungen, die nicht existieren (z.B. 4K bei reinen 1080p-Videos), werden ausgeblendet.")
                                 .font(.caption2)
                                 .foregroundStyle(.secondary)
                         }
@@ -158,13 +168,22 @@ public struct DetectedMediaSheet: View {
     
     private func loadStreams() async {
         isAnalyzing = true
+        errorMessage = nil
         do {
             let options = try await VideoExtractorService.shared.extractStreams(from: detectedURL, pageTitle: initialTitle)
-            self.availableOptions = options
+            await MainActor.run {
+                self.availableOptions = options
+                self.isAnalyzing = false
+                if options.isEmpty {
+                    self.errorMessage = "Es konnten keine abspielbaren Videoformate geladen werden."
+                }
+            }
         } catch {
-            print("Fehler beim Extrahieren: \(error)")
+            await MainActor.run {
+                self.errorMessage = error.localizedDescription
+                self.isAnalyzing = false
+            }
         }
-        isAnalyzing = false
     }
     
     private func startDownload(option: DetectedStreamOption) {
